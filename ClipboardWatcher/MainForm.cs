@@ -10,38 +10,68 @@ using System.Runtime.InteropServices;
 
 namespace ClipboardWatcher
 {
-  public partial class Form1 : Form
+  public class ClipboardEventArgs : EventArgs
+  {
+    public ClipboardEventArgs(string data)
+    {
+      Data = data;
+    }
+
+    public string Data { get; set; }
+  }
+
+  public partial class MainForm : Form
   {
     private IntPtr nextClipboardViewer;
-    private bool _isStart = false;
 
-    public Form1()
+    public event EventHandler<ClipboardEventArgs> ClipboardChanged;
+
+    public MainForm()
     {
       InitializeComponent();
       lbxWords.Items.Clear();
+
+      var startClicks = Observable.FromEvent<EventArgs>(btnStart, "Click");
+      var stopClicks = Observable.FromEvent<EventArgs>(btnStop, "Click");
+      var cbChanged = Observable.FromEvent<ClipboardEventArgs>(this, "ClipboardChanged");
+
+      Observable.Merge(startClicks.Select(_ => true), 
+                       stopClicks.Select(_ => false))
+                .DistinctUntilChanged()
+                .Subscribe(val =>
+      {
+        btnStart.Enabled = !val;
+        btnStop.Enabled = val;
+        DoMonitor(val);
+      });
+
+      var clipboard = from start in startClicks
+                      from cb in cbChanged.TakeUntil(stopClicks)
+                      select cb;
+
+      clipboard.Select(e => e.EventArgs.Data).DistinctUntilChanged().Subscribe(str => lbxWords.Items.Add(str));
     }
 
-    void StartMonitor()
+    void MainForm_ClipboardChanged(object sender, ClipboardEventArgs e)
     {
-      if (_isStart)
+      var cpdata = e.Data;
+      if (lbxWords.Items.Count == 0 || (string)lbxWords.Items[lbxWords.Items.Count - 1] != cpdata)
       {
-        return;
+        lbxWords.Items.Add(cpdata);
       }
-
-      Clipboard.Clear();
-      nextClipboardViewer = (IntPtr)SetClipboardViewer((int)this.Handle);
-      _isStart = true;
     }
 
-    void StopMonitor()
+    void DoMonitor(bool isStart)
     {
-      if (!_isStart)
+      if (isStart)
       {
-        return;
+        Clipboard.Clear();
+        nextClipboardViewer = (IntPtr)SetClipboardViewer((int)this.Handle);
       }
-
-      ChangeClipboardChain(this.Handle, nextClipboardViewer);
-      _isStart = false;
+      else
+      {
+        ChangeClipboardChain(this.Handle, nextClipboardViewer);
+      }
     }
 
     string ProcessWord(string word)
@@ -50,16 +80,17 @@ namespace ClipboardWatcher
       return trimmed.ToLower();
     }
 
-    private void DisplayClipboardData()
+    private void OnClipboardChanged()
     {
-      IDataObject data = Clipboard.GetDataObject();
+      var data = Clipboard.GetDataObject();
       if (data.GetDataPresent(DataFormats.Text))
       {
         string cpdata = data.GetData(DataFormats.Text).ToString();
 
-        if (lbxWords.Items.Count == 0 || (string) lbxWords.Items[lbxWords.Items.Count - 1] != cpdata)
+        var handler = ClipboardChanged;
+        if (handler != null)
         {
-          lbxWords.Items.Add(cpdata);
+          handler(this, new ClipboardEventArgs(cpdata));
         }
       }
     }
@@ -81,7 +112,7 @@ namespace ClipboardWatcher
       switch (message.Msg)
       {
         case WM_DRAWCLIPBOARD:
-          DisplayClipboardData();
+          OnClipboardChanged();
           SendMessage(nextClipboardViewer, message.Msg, message.WParam, message.LParam);
           break;
 
@@ -104,14 +135,12 @@ namespace ClipboardWatcher
 
     private void btnStart_Click(object sender, EventArgs e)
     {
-      StartMonitor();
       btnStart.Enabled = false;
       btnStop.Enabled = true;
     }
 
     private void btnStop_Click(object sender, EventArgs e)
     {
-      StopMonitor();
       btnStart.Enabled = true;
       btnStop.Enabled = false;
     }
@@ -126,6 +155,5 @@ namespace ClipboardWatcher
 
       Clipboard.SetDataObject(builder.ToString(), true);
     }
-
   }
 }
