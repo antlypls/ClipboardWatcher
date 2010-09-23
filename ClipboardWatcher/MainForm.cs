@@ -10,19 +10,9 @@ using System.Runtime.InteropServices;
 
 namespace ClipboardWatcher
 {
-  public class ClipboardEventArgs : EventArgs
-  {
-    public ClipboardEventArgs(string data)
-    {
-      Data = data;
-    }
-
-    public string Data { get; set; }
-  }
-
   public partial class MainForm : Form
   {
-    private IntPtr nextClipboardViewer;
+    private IntPtr _nextClipboardViewer;
 
     public event EventHandler<ClipboardEventArgs> ClipboardChanged;
 
@@ -42,7 +32,7 @@ namespace ClipboardWatcher
       {
         btnStart.Enabled = !val;
         btnStop.Enabled = val;
-        DoMonitor(val);
+        SetupMonitor(val);
       });
 
       var clipboard = from start in startClicks
@@ -52,29 +42,20 @@ namespace ClipboardWatcher
       clipboard.Select(e => e.EventArgs.Data).DistinctUntilChanged().Subscribe(str => lbxWords.Items.Add(str));
     }
 
-    void MainForm_ClipboardChanged(object sender, ClipboardEventArgs e)
-    {
-      var cpdata = e.Data;
-      if (lbxWords.Items.Count == 0 || (string)lbxWords.Items[lbxWords.Items.Count - 1] != cpdata)
-      {
-        lbxWords.Items.Add(cpdata);
-      }
-    }
-
-    void DoMonitor(bool isStart)
+    private void SetupMonitor(bool isStart)
     {
       if (isStart)
       {
         Clipboard.Clear();
-        nextClipboardViewer = (IntPtr)SetClipboardViewer((int)this.Handle);
+        _nextClipboardViewer = (IntPtr)NativeHelpers.SetClipboardViewer((int)this.Handle);
       }
       else
       {
-        ChangeClipboardChain(this.Handle, nextClipboardViewer);
+        NativeHelpers.ChangeClipboardChain(this.Handle, _nextClipboardViewer);
       }
     }
 
-    string ProcessWord(string word)
+    private string ProcessWord(string word)
     {
       var trimmed = word.Trim(new char[] {' ', '.', ','} );
       return trimmed.ToLower();
@@ -95,15 +76,6 @@ namespace ClipboardWatcher
       }
     }
 
-    [DllImport("User32.dll")]
-    protected static extern int SetClipboardViewer(int hWndNewViewer);
-
-    [DllImport("User32.dll", CharSet = CharSet.Auto)]
-    public static extern bool ChangeClipboardChain(IntPtr hWndRemove, IntPtr hWndNewNext);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern int SendMessage(IntPtr hwnd, int wMsg, IntPtr wParam, IntPtr lParam);
-
     protected override void WndProc(ref System.Windows.Forms.Message message)
     {
       const int WM_DRAWCLIPBOARD = 0x308;
@@ -113,17 +85,17 @@ namespace ClipboardWatcher
       {
         case WM_DRAWCLIPBOARD:
           OnClipboardChanged();
-          SendMessage(nextClipboardViewer, message.Msg, message.WParam, message.LParam);
+          NativeHelpers.SendMessage(_nextClipboardViewer, message.Msg, message.WParam, message.LParam);
           break;
 
         case WM_CHANGECBCHAIN:
-          if (message.WParam == nextClipboardViewer)
+          if (message.WParam == _nextClipboardViewer)
           {
-            nextClipboardViewer = message.LParam;
+            _nextClipboardViewer = message.LParam;
           }
           else
           {
-            SendMessage(nextClipboardViewer, message.Msg, message.WParam, message.LParam);
+            NativeHelpers.SendMessage(_nextClipboardViewer, message.Msg, message.WParam, message.LParam);
           }
           break;
 
@@ -131,18 +103,6 @@ namespace ClipboardWatcher
           base.WndProc(ref message);
           break;
       }
-    }
-
-    private void btnStart_Click(object sender, EventArgs e)
-    {
-      btnStart.Enabled = false;
-      btnStop.Enabled = true;
-    }
-
-    private void btnStop_Click(object sender, EventArgs e)
-    {
-      btnStart.Enabled = true;
-      btnStop.Enabled = false;
     }
 
     private void btnSave_Click(object sender, EventArgs e)
